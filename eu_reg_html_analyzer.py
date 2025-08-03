@@ -8,6 +8,7 @@ import re
 from datetime import datetime
 import os
 import traceback
+import roman
 
 class EURegulationAnalyzer:
     def __init__(self, regulation_url: str, regulation_metadata: Dict[str, Any], definition_articles: List[int] = None):
@@ -70,6 +71,20 @@ class EURegulationAnalyzer:
         
         return text
 
+    def _is_definition_article(self, title: str) -> bool:
+        """
+        記事のタイトルに基づいて定義条項かどうかを判定する
+        
+        Args:
+            title: 記事のタイトル
+            
+        Returns:
+            bool: 定義条項の場合True
+        """
+        if not title:
+            return False
+        return 'definition' in title.lower()
+
     def _extract_recitals(self) -> List[Dict[str, Any]]:
         """前文の抽出"""
         recitals = []
@@ -130,31 +145,72 @@ class EURegulationAnalyzer:
             return chapters
 
         try:
-            # チャプターセクションを特定
-            chapter_elements = self.soup.find_all('p', class_='oj-ti-section-1', string=re.compile(r'^CHAPTER \w+'))
+            # GDPRのチャプター構造に対応: div[id^="cpt_"]
+            chap_divs = self.soup.select('div[id^="cpt_"]')
             
-            for idx, element in enumerate(chapter_elements, 1):
-                title = element.get_text().strip()
-                chapter_number = re.search(r'CHAPTER (\w+)', title)
-                if chapter_number:
-                    # チャプタータイトルを取得
-                    title_element = element.find_next_sibling('div', class_='eli-title')
-                    subtitle = ""
-                    if title_element:
-                        subtitle_element = title_element.find('span', class_='oj-bold')
-                        if subtitle_element:
-                            subtitle = subtitle_element.get_text().strip()
-                    
-                    # チャプター番号とタイトルを分離
-                    chapter_num = chapter_number.group(1)
-                    
-                    chapters.append({
-                        "chapter_number": chapter_num,
-                        "title": subtitle,  # サブタイトルのみを使用
-                        "order_index": idx
-                    })
+            # 重複を避けるために、既に処理したチャプター番号を追跡
+            processed_chapters = set()
+            
+            for idx, chap_div in enumerate(chap_divs, 1):
+                # チャプターIDからローマ数字を取得（例: cpt_I → I）
+                chap_id = chap_div.get('id', '')
+                roman_match = re.search(r'cpt_([IVX]+)', chap_id)
+                if not roman_match:
+                    continue
+                
+                roman_numeral = roman_match.group(1)
+                
+                # ローマ数字をアラビア数字に変換
+                try:
+                    chapter_number = roman.fromRoman(roman_numeral)
+                except roman.InvalidRomanNumeralError:
+                    print(f"Invalid Roman numeral: {roman_numeral}")
+                    continue
+                
+                # 既に処理済みのチャプターはスキップ
+                if chapter_number in processed_chapters:
+                    continue
+                
+                processed_chapters.add(chapter_number)
+                
+                # チャプタータイトルを取得
+                title_element = chap_div.find('div', class_='eli-title')
+                title = ""
+                if title_element:
+                    title_p = title_element.find('p', class_='oj-ti-section-2')
+                    if title_p:
+                        title_span = title_p.find('span', class_='oj-bold')
+                        if title_span:
+                            title = self._normalize_text(title_span.get_text().strip())
+                
+                # チャプター内の条文番号を収集
+                article_numbers = []
+                # チャプター内のすべての条文を検索
+                article_divs = chap_div.find_all('div', id=lambda x: x and x.startswith('art_'))
+                for art_div in article_divs:
+                    art_id = art_div.get('id', '')
+                    art_match = re.search(r'art_(\d+)', art_id)
+                    if art_match:
+                        article_num = int(art_match.group(1))
+                        if article_num not in article_numbers:  # 重複を避ける
+                            article_numbers.append(article_num)
+                
+                # 条文番号をソート
+                article_numbers.sort()
+                
+                chapters.append({
+                    "chapter_number": chapter_number,
+                    "title": title,
+                    "article_numbers": article_numbers,
+                    "order_index": len(chapters) + 1
+                })
+                
+                print(f"Chapter {chapter_number}: {title} - Articles: {article_numbers}")
+                
         except Exception as e:
             print(f"チャプターの抽出中にエラー: {e}")
+            import traceback
+            traceback.print_exc()
 
         return chapters
 
@@ -205,7 +261,7 @@ class EURegulationAnalyzer:
 
         return subparagraphs
 
-    def _parse_paragraph(self, paragraph_element, article_number: int=None):
+    def _parse_paragraph(self, paragraph_element, article_number: int=None, title: str=""):
         """
         パラグラフ要素を解析し、構造化されたデータを返します。
         HTML構造に基づいて、テーブル内の要素をサブパラグラフとして、
@@ -217,7 +273,7 @@ class EURegulationAnalyzer:
         current_order_index = 1
         processed_texts = set()  # 重複チェック用のセット
         
-        is_definition = article_number in self.definition_articles if article_number else False
+        is_definition = self._is_definition_article(title)
 
         # パラグラフ番号を探す
         paragraph_number = None
@@ -316,7 +372,7 @@ class EURegulationAnalyzer:
             "metadata": metadata
         }
 
-    def _extract_paragraphs(self, article_element, article_number):
+    def _extract_paragraphs(self, article_element, article_number, title=""):
         """段落の抽出（定義規定を含む）"""
         paragraphs = []
         
@@ -331,7 +387,7 @@ class EURegulationAnalyzer:
                 print(f"Found intro text: {intro_text[:100]}...")
             
             # 定義規定の特別処理
-            if article_number in self.definition_articles:
+            if self._is_definition_article(title):
                 print("Processing Definitions...")
                 # 定義を含むテーブルを探す
                 definition_tables = article_element.find_all('table', recursive=False)
@@ -358,6 +414,7 @@ class EURegulationAnalyzer:
                             ordered_contents.append({
                                 'type': 'definition',
                                 'element_id': sp['subparagraph_id'],
+                                'subparagraph_id': sp['subparagraph_id'],
                                 'content': sp['content'],
                                 'order_index': current_order_index
                             })
@@ -439,12 +496,12 @@ class EURegulationAnalyzer:
                         print(f"Appending paragraph {current_paragraph_number}")
                         paragraphs.append(current_paragraph)
                     current_paragraph_number = number_match.group(1)
-                    current_paragraph = self._parse_paragraph(element, article_number)
+                    current_paragraph = self._parse_paragraph(element, article_number, title)
                     if current_paragraph:
                         print(f"Created new paragraph with {len(current_paragraph.get('ordered_contents', []))} ordered contents")
                 elif current_paragraph:
                     # 既存の段落に要素を追加
-                    parsed = self._parse_paragraph(element, article_number)
+                    parsed = self._parse_paragraph(element, article_number, title)
                     if parsed and parsed.get('ordered_contents'):
                         print(f"Adding {len(parsed['ordered_contents'])} elements to paragraph {current_paragraph_number}")
                         current_paragraph['ordered_contents'].extend(parsed['ordered_contents'])
@@ -495,8 +552,8 @@ class EURegulationAnalyzer:
             if subtitle_element:
                 title = self._normalize_text(subtitle_element.get_text())
 
-            # 段落を抽出（Article 2も同じ処理で行う）
-            paragraphs = self._extract_paragraphs(article_element, article_number)
+            # 段落を抽出（定義条項は自動検出）
+            paragraphs = self._extract_paragraphs(article_element, article_number, title)
 
             # content_full を構築
             paragraphs_content = [
@@ -512,7 +569,7 @@ class EURegulationAnalyzer:
                 'content_full': content_full,
                 'order_index': article_number,
                 'metadata': {
-                    'is_definitions': article_number in self.definition_articles,
+                    'is_definitions': self._is_definition_article(title),
                     'extracted_at': datetime.now().isoformat()
                 }
             }
@@ -526,128 +583,55 @@ class EURegulationAnalyzer:
 
     def _extract_annexes(self) -> List[Dict[str, Any]]:
         """附属書の抽出"""
-        return []
+        annexes = []
+        if not self.soup:
+            return annexes
 
-        # try:
-        #     # 附属書セクションを特定
-        #     annex_elements = self.soup.find_all('p', class_='oj-doc-ti', string=re.compile(r'^ANNEX'))
+        try:
+            # 附属書セクションを特定: div[id^="anx_"] (EUR-Lexの実際のパターン)
+            annex_divs = self.soup.select('div[id^="anx_"]')
             
-        #     for element in annex_elements:
-        #         # 基本情報の取得
-        #         title = element.get_text(strip=True)
-        #         sections = []
-        #         current_section = None
-        #         current_subsection = None
+            for idx, annex_div in enumerate(annex_divs):
+                # 附属書IDを取得（例: anx_1 → 1）
+                annex_id = annex_div.get('id', '')
+                annex_letter = annex_id.replace('anx_', '') if annex_id.startswith('anx_') else str(idx + 1)
                 
-        #         # 次の要素から処理開始
-        #         next_element = element.find_next_sibling()
+                # タイトルを取得: <p class="oj-doc-ti">
+                title = ""
+                title_element = annex_div.find('p', class_='oj-doc-ti')
+                if title_element:
+                    title = self._normalize_text(title_element.get_text())
                 
-        #         while next_element and not (next_element.name == 'p' and 'oj-doc-ti' in next_element.get('class', [])):
-        #             text = next_element.get_text(strip=True)
-                    
-        #             # セクション（A., B., C., など）の検出
-        #             section_match = re.match(r'^([A-E])\.\s*[\'"]?(.*?)[\'"]?$', text)
-        #             if section_match:
-        #                 current_section = {
-        #                     "section_id": section_match.group(1),
-        #                     "title": self._normalize_text(section_match.group(2)),
-        #                     "subsections": [],
-        #                     "content": ""
-        #                 }
-        #                 sections.append(current_section)
-                    
-        #             # サブセクション（1., 2., など）の検出
-        #             elif current_section and re.match(r'^\d+\.', text):
-        #                 current_subsection = {
-        #                     "number": re.match(r'^(\d+)\.', text).group(1),
-        #                     "content": self._normalize_text(text[text.find('.')+1:]),
-        #                     "items": []
-        #                 }
-        #                 current_section["subsections"].append(current_subsection)
-                    
-        #             # 項目（a., b., c., など）の検出
-        #             elif current_subsection and re.match(r'^[a-z]\.\s', text):
-        #                 item = {
-        #                     "id": text[0],
-        #                     "content": self._normalize_text(text[2:])
-        #                 }
-        #                 current_subsection["items"].append(item)
-                    
-        #             # 特別なケース：表形式データ（セクションE）
-        #             elif next_element.name == 'table' and current_section and current_section["section_id"] == "E":
-        #                 definitions = []
-        #                 for row in next_element.find_all('tr'):
-        #                     cells = row.find_all('td')
-        #                     if len(cells) >= 3:  # 3列以上ある場合
-        #                         service_type = cells[0].get_text(strip=True)
-        #                         active_end_users = cells[1].get_text(strip=True)
-        #                         active_business_users = cells[2].get_text(strip=True)
-        #                         if service_type and (active_end_users or active_business_users):
-        #                             definitions.append({
-        #                                 "service_type": self._normalize_text(service_type),
-        #                                 "active_end_users": self._normalize_text(active_end_users),
-        #                                 "active_business_users": self._normalize_text(active_business_users)
-        #                             })
-        #                 current_section["definitions"] = definitions
-                    
-        #             # 通常のテキストコンテンツ
-        #             elif text and not text.startswith('ANNEX'):
-        #                 if current_subsection:
-        #                     current_subsection["content"] += " " + self._normalize_text(text)
-        #                 elif current_section:
-        #                     current_section["content"] += " " + self._normalize_text(text)
-                    
-        #             next_element = next_element.find_next_sibling()
+                # セクションを収集: <p class="oj-normal">
+                sections = []
+                section_elements = annex_div.find_all('p', class_='oj-normal')
                 
-        #         # 構造化データの作成
-        #         content = {
-        #             "sections": sections,
-        #             "metadata": {
-        #                 "extracted_at": datetime.now().isoformat(),
-        #                 "structure": {
-        #                     "total_sections": len(sections),
-        #                     "section_details": [
-        #                         {
-        #                             "section_id": section["section_id"],
-        #                             "title": section["title"],
-        #                             "subsection_count": len(section["subsections"]),
-        #                             "has_definitions": "definitions" in section
-        #                         }
-        #                         for section in sections
-        #                     ]
-        #                 }
-        #             }
-        #         }
+                for section_element in section_elements:
+                    section_text = self._normalize_text(section_element.get_text())
+                    if section_text:
+                        sections.append(section_text)
                 
-        #         # 附属書オブジェクトの作成
-        #         annex = {
-        #             "annex_number": "1",  # DMAには1つの附属書しかない
-        #             "title": title,
-        #             "content": content,  # JSONBとして保存される構造化データ
-        #             "metadata": {
-        #                 "id": element.get('id', ''),
-        #                 "extracted_at": datetime.now().isoformat()
-        #             }
-        #         }
-        #         annexes.append(annex)
+                annex = {
+                    "annex_id": annex_letter,
+                    "title": title,
+                    "sections": sections,
+                    "order_index": idx + 1,
+                    "metadata": {
+                        "id": annex_id,
+                        "extracted_at": datetime.now().isoformat()
+                    }
+                }
+                annexes.append(annex)
+                
+                print(f"Annex {annex_letter}: {title} - Sections: {len(sections)}")
+                
+        except Exception as e:
+            print(f"附属書の抽出中にエラー: {e}")
+            import traceback
+            traceback.print_exc()
 
-        #         # 抽出結果の表示
-        #         print(f"\n附属書の抽出: {len(annexes)}件")
-        #         for annex in annexes:
-        #             print(f"ANNEX {annex['annex_number']}: {annex['title']}")
-        #             print(f"セクション数: {len(annex['content']['sections'])}")
-        #             for section in annex['content']['sections']:
-        #                 print(f"- セクション {section['section_id']}: {section['title']}")
-        #                 print(f"  サブセクション数: {len(section['subsections'])}")
-        #                 if 'definitions' in section:
-        #                     print(f"  定義数: {len(section['definitions'])}")
-
-        # except Exception as e:
-        #     print(f"附属書の抽出中にエラー: {e}")
-        #     import traceback
-        #     traceback.print_exc()
-
-        # return annexes
+        # 附属書をIDでソート
+        return sorted(annexes, key=lambda x: x["annex_id"])
         
 
     def save_structured_data(self):
@@ -673,10 +657,10 @@ class EURegulationAnalyzer:
             annexes = self._extract_annexes()
             print(f"附属書数: {len(annexes)}")
 
-            # データを保存
+            # データを保存（動的な値を使用）
             data = {
                 'metadata': {
-                    'title': 'Digital Markets Act',
+                    'title': self.regulation_data.get('name', 'Unknown Regulation'),
                     'extracted_at': datetime.now().isoformat()
                 },
                 'recitals': recitals,
@@ -685,15 +669,17 @@ class EURegulationAnalyzer:
                 'annexes': annexes
             }
 
-            # 保存先ディレクトリを作成
-            os.makedirs('dma_data', exist_ok=True)
+            # 保存先ディレクトリを作成（動的に）
+            regulation_name = self.regulation_data.get('name', 'unknown').lower()
+            output_dir = f'{regulation_name}_data'
+            os.makedirs(output_dir, exist_ok=True)
 
-            # JSONファイルに保存
-            output_path = os.path.join('dma_data', 'dma_structured.json')
+            # JSONファイルに保存（動的に）
+            output_path = os.path.join(output_dir, f'{regulation_name}_structured.json')
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
-            print(f"データを dma_data に保存しました。")
+            print(f"データを {output_dir} に保存しました。")
             print(f"- 前文数: {len(recitals)}")
             print(f"- チャプター数: {len(chapters)}")
             print(f"- 条文数: {len(articles)}")
