@@ -1,6 +1,7 @@
 import requests
 import json
 import time
+import logging
 from typing import Dict, Any, Optional, List
 from pathlib import Path
 from bs4 import BeautifulSoup
@@ -9,8 +10,30 @@ from datetime import datetime
 import os
 import traceback
 import roman
-import pandas as pd
 from io import StringIO
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+)
+logger = logging.getLogger(__name__)
+
+# Guard pandas import for debugging
+try:
+    import pandas as pd
+    PANDAS_AVAILABLE = True
+except ImportError:
+    logger.warning("pandas not available, table parsing will use fallback method")
+    PANDAS_AVAILABLE = False
+
+# Configurable selectors
+SELECTORS = {
+    "recital_div": "div.eli-subdivision[id^='rct_']",
+    "chapter_h2": "h2.oj-ti-section-2[id^='sect_']",
+    "article_div": "div.eli-subdivision[id^='art_']",
+    "annex_div": "div.oj-normal[id^='annex_']",
+}
 
 class SectionBuilder:
     """Helper class for building hierarchical annex sections"""
@@ -305,33 +328,50 @@ def _preprocess_orphan_numbers(content_nodes):
     return buffer
 
 
+def _retry_request(session, url, max_attempts=5, base_delay=2):
+    """Retry HTTP request with exponential backoff"""
+    for attempt in range(max_attempts):
+        try:
+            logger.debug(f"Attempt {attempt + 1}/{max_attempts} for {url}")
+            response = session.get(url, timeout=30)
+            response.raise_for_status()
+            return response
+        except requests.RequestException as e:
+            if attempt == max_attempts - 1:
+                logger.error(f"Final attempt failed: {e}")
+                raise
+            delay = base_delay * (2 ** attempt)
+            logger.warning(f"Attempt {attempt + 1} failed: {e}. Retrying in {delay}s...")
+            time.sleep(delay)
+    return None
+
 class EURegulationAnalyzer:
     def __init__(self, regulation_url: str, regulation_metadata: Dict[str, Any], definition_articles: List[int] = None):
         """
-        初期化
+        Initialize the EU Regulation Analyzer
+        
         Args:
-            regulation_url: EUR-Lexの法令URL
-            regulation_metadata: 法令のメタデータ（名前、施行日等）を含む辞書
-            definition_articles: 定義条項の条番号のリスト。指定がない場合は[2, 4]を使用
+            regulation_url: EUR-Lex regulation URL
+            regulation_metadata: Dictionary containing regulation metadata (name, effective date, etc.)
+            definition_articles: List of article numbers containing definitions. Defaults to [2, 4] if not specified
         """
         self.regulation_url = regulation_url
         self.session = requests.Session()
         self.session.headers.update({
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36'
+            'User-Agent': 'EURegHTMLAnalyzer/1.1'
         })
         self.soup = None
         self.regulation_data = regulation_metadata
         self.definition_articles = definition_articles if definition_articles is not None else [2, 4]
 
     def _download_content(self) -> bool:
-        """HTMLコンテンツのダウンロード"""
+        """Download HTML content with retry logic"""
         try:
-            response = self.session.get(self.regulation_url)
-            response.raise_for_status()
+            response = _retry_request(self.session, self.regulation_url)
             self.soup = BeautifulSoup(response.text, 'html.parser')
             return True
         except Exception as e:
-            print(f"HTMLコンテンツのダウンロード中にエラー: {e}")
+            logger.error(f"Error downloading HTML content: {e}")
             return False
 
     def _normalize_text(self, text: str) -> str:
@@ -381,17 +421,17 @@ class EURegulationAnalyzer:
         return 'definition' in title.lower()
 
     def _extract_recitals(self) -> List[Dict[str, Any]]:
-        """前文の抽出"""
+        """Extract recitals from the regulation"""
         recitals = []
         if not self.soup:
             return recitals
 
         try:
-            # 前文セクションを特定
-            recital_elements = self.soup.find_all('div', class_='eli-subdivision', id=lambda x: x and x.startswith('rct_'))
+            # Find recital sections using configurable selector
+            recital_elements = self.soup.select(SELECTORS["recital_div"])
             
             for element in recital_elements:
-                # 前文番号を取得
+                # Get recital number
                 number_element = element.find('p', class_='oj-normal')
                 if not number_element:
                     continue
@@ -403,19 +443,19 @@ class EURegulationAnalyzer:
                 
                 recital_number = number_match.group(1)
                 
-                # 前文のテキストを取得
+                # Get recital text
                 content_elements = element.find_all('p', class_='oj-normal')
-                # 最初の要素（番号を含む）から番号部分を除去
+                # Remove number part from first element
                 first_text = text[len(number_match.group(0)):].strip()
-                # 残りの要素のテキストを結合
+                # Combine remaining elements' text
                 remaining_text = ' '.join(p.get_text(strip=True) for p in content_elements[1:])
                 
-                # 完全なテキストを構築
+                # Build complete text
                 full_text = first_text
                 if remaining_text:
                     full_text += ' ' + remaining_text
                 
-                # テキストを正規化
+                # Normalize text
                 full_text = self._normalize_text(full_text)
                 
                 recitals.append({
@@ -427,8 +467,7 @@ class EURegulationAnalyzer:
                     }
                 })
         except Exception as e:
-            print(f"前文の抽出中にエラー: {e}")
-            import traceback
+            logger.error(f"Error extracting recitals: {e}")
             traceback.print_exc()
 
         return sorted(recitals, key=lambda x: int(x["recital_number"]))
@@ -459,7 +498,7 @@ class EURegulationAnalyzer:
                 try:
                     chapter_number = roman.fromRoman(roman_numeral)
                 except roman.InvalidRomanNumeralError:
-                    print(f"Invalid Roman numeral: {roman_numeral}")
+                    logger.warning(f"Invalid Roman numeral: {roman_numeral}")
                     continue
                 
                 # 既に処理済みのチャプターはスキップ
@@ -500,11 +539,10 @@ class EURegulationAnalyzer:
                     "order_index": len(chapters) + 1
                 })
                 
-                print(f"Chapter {chapter_number}: {title} - Articles: {article_numbers}")
+                logger.info(f"Chapter {chapter_number}: {title} - Articles: {article_numbers}")
                 
         except Exception as e:
-            print(f"チャプターの抽出中にエラー: {e}")
-            import traceback
+            logger.error(f"Error extracting chapters: {e}")
             traceback.print_exc()
 
         return chapters
@@ -563,7 +601,7 @@ class EURegulationAnalyzer:
         テーブル外の要素をchapeauとして扱います。
         定義条項の場合は、subparagraphをdefinitionとして扱います。
         """
-        print("\nParsing paragraph element...")
+        logger.debug("Parsing paragraph element...")
         ordered_contents = []
         current_order_index = 1
         processed_texts = set()  # 重複チェック用のセット
@@ -591,7 +629,7 @@ class EURegulationAnalyzer:
         # テーブル要素の処理（すべてサブパラグラフとして扱う）
         tables = paragraph_element.find_all('table')
         for table in tables:
-            print(f"Processing table with {len(table.find_all('tr'))} rows")
+            logger.debug(f"Processing table with {len(table.find_all('tr'))} rows")
             for row in table.find_all('tr'):
                 cells = row.find_all('td')
                 if len(cells) == 2:  # サブパラグラフの形式を確認
@@ -621,7 +659,7 @@ class EURegulationAnalyzer:
                             })
                         processed_texts.add(content)
                         current_order_index += 1
-                        print(f"Added subparagraph {subparagraph_id} with order_index {current_order_index-1}")
+                        logger.debug(f"Added subparagraph {subparagraph_id} with order_index {current_order_index-1}")
         
         # テーブル外のp.oj-normal要素の処理（最初のパラグラフ以外はすべてchapeauとして扱う）
         for p in paragraph_element.find_all('p', class_='oj-normal'):
@@ -637,10 +675,10 @@ class EURegulationAnalyzer:
                         })
                         processed_texts.add(text)
                         current_order_index += 1
-                        print(f"Added additional chapeau with order_index {current_order_index-1}")
+                        logger.debug(f"Added additional chapeau with order_index {current_order_index-1}")
         
         if not ordered_contents:
-            print("No ordered contents found, returning None")
+            logger.debug("No ordered contents found, returning None")
             return None
         
         # content_fullの構築
@@ -672,22 +710,22 @@ class EURegulationAnalyzer:
         paragraphs = []
         
         try:
-            print(f"\nProcessing Article {article_number}...")
+            logger.debug(f"Processing Article {article_number}...")
             
             # 最初の柱書きを探す
             intro_text = None
             intro_p = article_element.find('p', class_='oj-normal')
             if intro_p and not re.match(r'^\d+\.\s*', intro_p.get_text(strip=True)):
                 intro_text = self._normalize_text(intro_p.get_text(strip=True))
-                print(f"Found intro text: {intro_text[:100]}...")
+                logger.debug(f"Found intro text: {intro_text[:100]}...")
             
             # 定義規定の特別処理
             if self._is_definition_article(title):
-                print("Processing Definitions...")
+                logger.debug("Processing Definitions...")
                 # 定義を含むテーブルを探す
                 definition_tables = article_element.find_all('table', recursive=False)
                 if definition_tables:
-                    print(f"Found {len(definition_tables)} definition tables")
+                    logger.debug(f"Found {len(definition_tables)} definition tables")
                     # 定義を1つの段落として扱う
                     ordered_contents = []
                     content_parts = []
@@ -729,9 +767,9 @@ class EURegulationAnalyzer:
                     return paragraphs
             
             # 通常の条文の処理
-            print("Processing regular article...")
+            logger.debug("Processing regular article...")
             paragraph_elements = article_element.find_all(['div', 'p', 'table'], recursive=False)
-            print(f"Found {len(paragraph_elements)} paragraph elements")
+            logger.debug(f"Found {len(paragraph_elements)} paragraph elements")
             
             # パラグラフ番号がある要素を探す
             has_numbered_paragraphs = False
@@ -743,7 +781,7 @@ class EURegulationAnalyzer:
             
             if not has_numbered_paragraphs:
                 # パラグラフ番号がない場合は、条文全体を1つのパラグラフとして処理
-                print("No numbered paragraphs found, treating entire article as single paragraph")
+                logger.debug("No numbered paragraphs found, treating entire article as single paragraph")
                 full_text = ""
                 for element in paragraph_elements:
                     if element.name == 'p' and 'oj-normal' in element.get('class', []):
@@ -779,26 +817,26 @@ class EURegulationAnalyzer:
                 if not text:
                     continue
                 
-                print(f"\nProcessing element: {element.name}")
-                print(f"Text preview: {text[:100]}...")
+                logger.debug(f"Processing element: {element.name}")
+                logger.debug(f"Text preview: {text[:100]}...")
                 
                 # 段落番号のパターン（例：1., 2., など）
                 number_match = re.match(r'^(\d+)\.\s*', text)
                 if number_match:
-                    print(f"Found paragraph number: {number_match.group(1)}")
+                    logger.debug(f"Found paragraph number: {number_match.group(1)}")
                     # 新しい段落の開始
                     if current_paragraph:
-                        print(f"Appending paragraph {current_paragraph_number}")
+                        logger.debug(f"Appending paragraph {current_paragraph_number}")
                         paragraphs.append(current_paragraph)
                     current_paragraph_number = number_match.group(1)
                     current_paragraph = self._parse_paragraph(element, article_number, title)
                     if current_paragraph:
-                        print(f"Created new paragraph with {len(current_paragraph.get('ordered_contents', []))} ordered contents")
+                        logger.debug(f"Created new paragraph with {len(current_paragraph.get('ordered_contents', []))} ordered contents")
                 elif current_paragraph:
                     # 既存の段落に要素を追加
                     parsed = self._parse_paragraph(element, article_number, title)
                     if parsed and parsed.get('ordered_contents'):
-                        print(f"Adding {len(parsed['ordered_contents'])} elements to paragraph {current_paragraph_number}")
+                        logger.debug(f"Adding {len(parsed['ordered_contents'])} elements to paragraph {current_paragraph_number}")
                         current_paragraph['ordered_contents'].extend(parsed['ordered_contents'])
                         current_paragraph['content_full'] = '\n\n'.join([
                             current_paragraph['content_full'],
@@ -807,28 +845,27 @@ class EURegulationAnalyzer:
             
             # 最後の段落を追加
             if current_paragraph:
-                print(f"Appending final paragraph {current_paragraph_number}")
+                logger.debug(f"Appending final paragraph {current_paragraph_number}")
                 paragraphs.append(current_paragraph)
             
-            print(f"Extracted {len(paragraphs)} paragraphs")
+            logger.debug(f"Extracted {len(paragraphs)} paragraphs")
             return paragraphs
 
         except Exception as e:
-            print(f"Error extracting paragraphs: {str(e)}")
-            import traceback
-            print(traceback.format_exc())
+            logger.error(f"Error extracting paragraphs: {str(e)}")
+            traceback.print_exc()
             return []
 
-    def _extract_articles(self):  # soup 引数を削除
+    def _extract_articles(self):
         """
-        条文を抽出するメソッド。
+        Extract articles from the regulation
         """
         if not self.soup:
-            print("Error: HTML content not loaded")
+            logger.error("Error: HTML content not loaded")
             return []
         
         articles = []
-        article_elements = self.soup.find_all('div', class_='eli-subdivision', id=lambda x: x and x.startswith('art_'))
+        article_elements = self.soup.select(SELECTORS["article_div"])
     
     
         for article_element in article_elements:
@@ -869,10 +906,10 @@ class EURegulationAnalyzer:
                 }
             }
             articles.append(article)
-            print(f"条文 {article_number} を処理中:")
-            print(f"タイトル: {title}")
+            logger.debug(f"Processing article {article_number}:")
+            logger.debug(f"Title: {title}")
             if paragraphs:
-                print(f"-> 条文を追加しました（段落数: {len(paragraphs)}）")
+                logger.debug(f"-> Article added (paragraphs: {len(paragraphs)})")
 
         return sorted(articles, key=lambda x: x['article_number'])
 
@@ -896,14 +933,23 @@ class EURegulationAnalyzer:
                 if caption_element:
                     caption = self._normalize_text(caption_element.get_text())
                 
-                # Use pandas to parse the table
-                df = pd.read_html(StringIO(str(table)))[0]
-                
-                # Clean up NaN values - replace with empty strings
-                df = df.fillna("")
-                
-                # Convert to dict records
-                rows = df.to_dict("records")
+                # Use pandas to parse the table if available
+                if PANDAS_AVAILABLE:
+                    df = pd.read_html(StringIO(str(table)))[0]
+                    # Clean up NaN values - replace with empty strings
+                    df = df.fillna("")
+                    # Convert to dict records
+                    rows = df.to_dict("records")
+                else:
+                    # Fallback: manual table parsing
+                    rows = []
+                    for row in table.find_all('tr'):
+                        cells = row.find_all(['td', 'th'])
+                        if cells:
+                            row_data = {}
+                            for i, cell in enumerate(cells):
+                                row_data[f"col_{i}"] = self._normalize_text(cell.get_text())
+                            rows.append(row_data)
                 
                 tables.append({
                     "caption": caption,
@@ -911,7 +957,7 @@ class EURegulationAnalyzer:
                 })
                 
             except Exception as e:
-                print(f"Error parsing table: {e}")
+                logger.error(f"Error parsing table: {e}")
                 # Fallback: manual table parsing
                 rows = []
                 for row in table.find_all('tr'):
@@ -979,7 +1025,7 @@ class EURegulationAnalyzer:
         if html_words > 0:
             ratio = extracted_words / html_words
             if ratio < 0.90:
-                print(f"Warning: Annex {annex.get('annex_id', 'unknown')} word ratio {ratio:.2f} < 0.90")
+                logger.warning(f"Annex {annex.get('annex_id', 'unknown')} word ratio {ratio:.2f} < 0.90")
 
     def _validate_annex_uniqueness(self, annexes: List[Dict[str, Any]]) -> None:
         """Validate that annex_ids and section_ids within each annex are unique"""
@@ -1018,7 +1064,7 @@ class EURegulationAnalyzer:
                     headers.append(header)
             
             if not headers:
-                print("No annex headers found")
+                logger.warning("No annex headers found")
                 return []
             
             # Step 3: Process each annex with deduplication
@@ -1046,7 +1092,7 @@ class EURegulationAnalyzer:
                             annex_id = 'IX'
                             title = f"ANNEX {annex_id}"
                             subtitle = header_text
-                            print(f"Detected ANNEX IX content header: {header_text[:100]}...")
+                            logger.debug(f"Detected ANNEX IX content header: {header_text[:100]}...")
                         else:
                             # Default to roman numeral based on order for standalone "ANNEX"
                             roman_numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV']
@@ -1055,7 +1101,7 @@ class EURegulationAnalyzer:
                             # Extract descriptive subtitle (everything after "ANNEX")
                             subtitle_match = re.search(r'ANNEX\s*(.+)', header_text)
                             subtitle = subtitle_match.group(1).strip() if subtitle_match else ""
-                            print(f"Using default annex ID '{annex_id}' for standalone ANNEX: {header_text}")
+                            logger.debug(f"Using default annex ID '{annex_id}' for standalone ANNEX: {header_text}")
                     
                     # Step 4: Collect sibling nodes until next header or end
                     current = header.next_sibling
@@ -1094,13 +1140,13 @@ class EURegulationAnalyzer:
                                 nodes_to_remove = i + 1
                                 if not subtitle and i == 0:  # Use first removed node as subtitle
                                     subtitle = node_text
-                                print(f"Marking node {i} for removal (subtitle): '{node_text[:50]}...'")
+                                logger.debug(f"Marking node {i} for removal (subtitle): '{node_text[:50]}...'")
                             else:
                                 break  # Stop at first non-subtitle node
                     
                     if nodes_to_remove > 0:
                         content_nodes = content_nodes[nodes_to_remove:]
-                        print(f"Removed {nodes_to_remove} subtitle nodes for annex {annex_id}")
+                        logger.debug(f"Removed {nodes_to_remove} subtitle nodes for annex {annex_id}")
                     
                     # Step 5: Pre-process orphan numbers
                     processed_texts = _preprocess_orphan_numbers(content_nodes)
@@ -1158,7 +1204,7 @@ class EURegulationAnalyzer:
                                 builder.add_table_to_current_section(table_data)
                                 
                             except Exception as e:
-                                print(f"Error parsing table in annex {annex_id}: {e}")
+                                logger.error(f"Error parsing table in annex {annex_id}: {e}")
                                 # Fallback: process as text if table parsing fails
                                 for row in node.find_all('tr'):
                                     cells = row.find_all(['td', 'th'])
@@ -1193,7 +1239,7 @@ class EURegulationAnalyzer:
                         # Merge into existing annex
                         existing = annex_map[annex_id]
                         _merge_sections(existing["sections"], sections)
-                        print(f"Merged content into existing Annex {annex_id}")
+                        logger.debug(f"Merged content into existing Annex {annex_id}")
                     else:
                         # Create new annex (without top-level tables array)
                         annex = {
@@ -1210,17 +1256,16 @@ class EURegulationAnalyzer:
                             try:
                                 self._validate_annex(annex, original_html)
                             except ValueError as e:
-                                print(f"Validation error for annex {annex_id}: {e}")
+                                logger.warning(f"Validation error for annex {annex_id}: {e}")
                         
                         annex_map[annex_id] = annex
                         
                         # Count tables in sections for logging
                         total_tables = sum(len(section.get("tables", [])) for section in sections)
-                        print(f"Created Annex {annex_id}: {len(sections)} sections, {total_tables} tables")
+                        logger.info(f"Created Annex {annex_id}: {len(sections)} sections, {total_tables} tables")
                     
                 except Exception as e:
-                    print(f"Error processing annex: {e}")
-                    import traceback
+                    logger.error(f"Error processing annex: {e}")
                     traceback.print_exc()
             
             # Step 9: Convert map to sorted list and validate uniqueness
@@ -1233,36 +1278,35 @@ class EURegulationAnalyzer:
             return annexes
                     
         except Exception as e:
-            print(f"Error in annex extraction: {e}")
-            import traceback
+            logger.error(f"Error in annex extraction: {e}")
             traceback.print_exc()
             return []
         
 
-    def save_structured_data(self):
-        """構造化データを保存"""
+    def save_structured_data(self, output_path: Optional[str] = None):
+        """Save structured data to JSON file"""
         if not self._download_content():
-            print("HTMLデータのダウンロードに失敗しました。")
+            logger.error("Failed to download HTML data")
             return
 
         try:
-            # 前文を抽出
+            # Extract recitals
             recitals = self._extract_recitals()
-            print(f"\n前文数: {len(recitals)}")
+            logger.info(f"Extracted {len(recitals)} recitals")
 
-            # チャプターを抽出
+            # Extract chapters
             chapters = self._extract_chapters()
-            print(f"チャプター数: {len(chapters)}")
+            logger.info(f"Extracted {len(chapters)} chapters")
 
-            # 条文を抽出
+            # Extract articles
             articles = self._extract_articles()
-            print(f"条文数: {len(articles)}")
+            logger.info(f"Extracted {len(articles)} articles")
 
-            # 附属書を抽出
+            # Extract annexes
             annexes = self._extract_annexes()
-            print(f"附属書数: {len(annexes)}")
+            logger.info(f"Extracted {len(annexes)} annexes")
 
-            # データを保存（動的な値を使用）
+            # Prepare data for saving
             data = {
                 'metadata': {
                     'title': self.regulation_data.get('name', 'Unknown Regulation'),
@@ -1274,57 +1318,83 @@ class EURegulationAnalyzer:
                 'annexes': annexes
             }
 
-            # 保存先ディレクトリを作成（動的に）
-            regulation_name = self.regulation_data.get('name', 'unknown').lower()
-            output_dir = f'{regulation_name}_data'
-            os.makedirs(output_dir, exist_ok=True)
+            # Determine output path
+            if output_path is None:
+                regulation_name = self.regulation_data.get('name', 'unknown').lower()
+                output_path = f'{regulation_name}_structured.json'
 
-            # JSONファイルに保存（動的に）
-            output_path = os.path.join(output_dir, f'{regulation_name}_structured.json')
+            # Create output directory if needed
+            output_dir = os.path.dirname(output_path)
+            if output_dir:
+                os.makedirs(output_dir, exist_ok=True)
+
+            # Save to JSON file
             with open(output_path, 'w', encoding='utf-8') as f:
                 json.dump(data, f, ensure_ascii=False, indent=2)
 
-            print(f"データを {output_dir} に保存しました。")
-            print(f"- 前文数: {len(recitals)}")
-            print(f"- チャプター数: {len(chapters)}")
-            print(f"- 条文数: {len(articles)}")
-            print(f"- 附属書数: {len(annexes)}")
+            logger.info(f"Data saved to {output_path}")
+            logger.info(f"- Recitals: {len(recitals)}")
+            logger.info(f"- Chapters: {len(chapters)}")
+            logger.info(f"- Articles: {len(articles)}")
+            logger.info(f"- Annexes: {len(annexes)}")
 
         except Exception as e:
-            print(f"データの保存中にエラー: {e}")
+            logger.error(f"Error saving data: {e}")
             traceback.print_exc()
 
 def main():
     import argparse
+    import json
 
-    # コマンドライン引数の設定
-    parser = argparse.ArgumentParser(description='法令のHTMLから構造化データを抽出します。')
+    # Command line argument setup
+    parser = argparse.ArgumentParser(description='Extract structured data from EU regulation HTML')
     parser.add_argument('--url', type=str, required=True,
-                        help='EUR-Lexの法令URL')
+                        help='EUR-Lex regulation URL')
     parser.add_argument('--name', type=str, required=True,
-                        help='法令の短縮名（例: GDPR, DMAなど）')
+                        help='Regulation short name (e.g., GDPR, DMA)')
     parser.add_argument('--definition-articles', type=int, nargs='+',
-                        help='定義条項の条番号をスペース区切りで指定（例: 2 4）。指定がない場合は[2, 4]を使用')
+                        help='Articles (numbers) that contain definitions, e.g. 2 4')
+    parser.add_argument('--layout-profile', type=str,
+                        help='Path to JSON file with custom CSS selectors')
+    parser.add_argument('--log-level', type=str, choices=['DEBUG', 'INFO', 'WARNING', 'ERROR'],
+                        default='INFO', help='Logging level (default: INFO)')
+    parser.add_argument('--output', type=str,
+                        help='Output JSON file path (default: <name>_structured.json)')
 
     args = parser.parse_args()
 
-    # メタデータの設定
+    # Set logging level
+    logging.getLogger().setLevel(getattr(logging, args.log_level))
+
+    # Load custom selectors if provided
+    global SELECTORS
+    if args.layout_profile:
+        try:
+            with open(args.layout_profile, 'r') as f:
+                custom_selectors = json.load(f)
+                SELECTORS.update(custom_selectors)
+                logger.info(f"Loaded custom selectors from {args.layout_profile}")
+        except Exception as e:
+            logger.error(f"Error loading layout profile: {e}")
+            return
+
+    # Set up metadata
     metadata = {
         "name": args.name,
         "official_title": args.name,
         "short_title": args.name,
         "jurisdiction_id": "EU",
         "document_date": datetime.now().strftime("%Y-%m-%d"),
-        "version": "1.0",
+        "version": "1.1",
         "status": "enacted",
         "metadata": {}
     }
     
-    # アナライザーの初期化と実行
+    # Initialize and run analyzer
     analyzer = EURegulationAnalyzer(args.url, metadata, args.definition_articles)
-    print(f"{metadata['name']}の構造化データを抽出中...")
-    print(f"定義条項: {analyzer.definition_articles}")
-    analyzer.save_structured_data()
+    logger.info(f"Extracting structured data for {metadata['name']}...")
+    logger.info(f"Definition articles: {analyzer.definition_articles}")
+    analyzer.save_structured_data(args.output)
 
 if __name__ == "__main__":
     main()
