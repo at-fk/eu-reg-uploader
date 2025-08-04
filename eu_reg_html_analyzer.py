@@ -9,6 +9,301 @@ from datetime import datetime
 import os
 import traceback
 import roman
+import pandas as pd
+from io import StringIO
+
+class SectionBuilder:
+    """Helper class for building hierarchical annex sections"""
+    
+    def __init__(self):
+        self.sections = []
+        self.current_section = None
+        self.current_subsection = None
+        
+        # Regex patterns for different list types
+        self.DASH = re.compile(r'^[—\-•]\s*(.+)')
+        self.NUMBER = re.compile(r'^(\d+)[\.\)]\s+(.+)')
+        self.LETTER = re.compile(r'^\(([a-z])\)\s+(.+)')
+        self.ROMAN = re.compile(r'^\(([ivx]+)\)\s+(.+)', re.IGNORECASE)
+        self.HIER = re.compile(r'^(\d+)\.\s+(\d+)\.\s+(.+)')
+    
+    def add_table_to_current_section(self, table):
+        """Add a table to the current section"""
+        if self.current_section is not None:
+            if "tables" not in self.current_section:
+                self.current_section["tables"] = []
+            self.current_section["tables"].append(table)
+        else:
+            # If no current section, create a default one
+            self.current_section = {
+                "section_id": "1",
+                "heading": "",
+                "list_type": "ordered",
+                "items": [],
+                "subsections": [],
+                "tables": [table]
+            }
+            self.sections.append(self.current_section)
+    
+    def _detect_list_type(self, items):
+        """Detect the predominant list type from items"""
+        if not items:
+            return "dash"
+        
+        dash_count = sum(1 for item in items if self.DASH.match(item))
+        if dash_count > len(items) * 0.7:
+            return "dash"
+        
+        letter_count = sum(1 for item in items if self.LETTER.match(item))
+        if letter_count > len(items) * 0.5:
+            return "letter"
+        
+        return "ordered"
+    
+    def _find_existing_section(self, section_id):
+        """Find existing section by ID"""
+        for section in self.sections:
+            if section["section_id"] == section_id:
+                return section
+        return None
+    
+    def feed_text(self, txt):
+        """Process text content, handling different bullet types and hierarchy"""
+        if not txt or not txt.strip():
+            return
+        
+        txt = txt.strip()
+        
+        # Skip standalone bullets
+        if txt in {"—", "-", "•"}:
+            return
+        
+        # Check for Section A/B/C pattern (e.g., "Section A. List of..." or "Section A — Information...")
+        section_ab_match = re.match(r'^Section\s+([A-Z])[\.\s—–\-]+(.+)', txt)
+        if section_ab_match:
+            section_letter = section_ab_match.group(1)
+            heading = section_ab_match.group(2).strip()
+            
+            self.current_section = {
+                "section_id": section_letter,
+                "heading": heading,
+                "list_type": "ordered",
+                "items": [],
+                "subsections": [],
+                "tables": []
+            }
+            self.sections.append(self.current_section)
+            self.current_subsection = None
+            return
+        
+        # Check for hierarchical numbering (3. 1. content)
+        hier_match = self.HIER.match(txt)
+        if hier_match:
+            parent_id = hier_match.group(1)
+            child_id = hier_match.group(2)
+            content = hier_match.group(3).strip()
+            
+            # Create hierarchical section ID
+            section_id = f"{parent_id}.{child_id}"
+            
+            # Check if section exists
+            existing = self._find_existing_section(section_id)
+            if existing:
+                existing["items"].append(content)
+                self.current_section = existing
+            else:
+                self.current_section = {
+                    "section_id": section_id,
+                    "heading": content,
+                    "list_type": "ordered",
+                    "items": [],
+                    "subsections": [],
+                    "tables": []
+                }
+                self.sections.append(self.current_section)
+            
+            self.current_subsection = None
+            return
+        
+        # Check for numbered section (1., 2., etc.)
+        number_match = self.NUMBER.match(txt)
+        if number_match:
+            section_id = number_match.group(1)
+            heading = number_match.group(2).strip()
+            
+            # Check if section already exists
+            existing = self._find_existing_section(section_id)
+            if existing:
+                # Merge into existing section
+                if heading and heading not in existing.get("heading", ""):
+                    existing["heading"] = existing.get("heading", "") + " " + heading
+                self.current_section = existing
+            else:
+                # Create new section
+                self.current_section = {
+                    "section_id": section_id,
+                    "heading": heading,
+                    "list_type": "ordered",  # Will be updated later
+                    "items": [],
+                    "subsections": [],
+                    "tables": []
+                }
+                self.sections.append(self.current_section)
+            
+            self.current_subsection = None
+            return
+        
+        # Check for lettered subsection (a), (b), etc.
+        letter_match = self.LETTER.match(txt)
+        if letter_match and self.current_section:
+            letter_id = letter_match.group(1)
+            content = letter_match.group(2).strip()
+            
+            # Create subsection if not exists
+            if not self.current_subsection or self.current_subsection.get("subsection_id") != letter_id:
+                self.current_subsection = {
+                    "subsection_id": letter_id,
+                    "items": []
+                }
+                self.current_section["subsections"].append(self.current_subsection)
+            
+            self.current_subsection["items"].append(content)
+            return
+        
+        # Check for dash/bullet items
+        dash_match = self.DASH.match(txt)
+        if dash_match:
+            content = dash_match.group(1).strip()
+            if self.current_section:
+                self.current_section["items"].append(content)
+            return
+        
+        # Default: add to current section items
+        if self.current_section:
+            self.current_section["items"].append(txt)
+        else:
+            # If no current section, create a default one
+            self.current_section = {
+                "section_id": "1",
+                "heading": "",
+                "list_type": "dash",
+                "items": [txt],
+                "subsections": [],
+                "tables": []
+            }
+            self.sections.append(self.current_section)
+    
+    def feed_list(self, li_text):
+        """Process list item content"""
+        self.feed_text(li_text)
+    
+    def flush(self):
+        """Return the built sections and reset state"""
+        # Update list types based on actual content
+        for section in self.sections:
+            if section["items"]:
+                section["list_type"] = self._detect_list_type(section["items"])
+        
+        result = self.sections
+        self.sections = []
+        self.current_section = None
+        self.current_subsection = None
+        return result
+
+
+def _merge_sections(existing_sections, new_sections):
+    """Merge new sections into existing sections, avoiding duplicates"""
+    existing_ids = {sec["section_id"] for sec in existing_sections}
+    
+    for new_sec in new_sections:
+        section_id = new_sec["section_id"]
+        if section_id in existing_ids:
+            # Find existing section and merge content
+            for existing_sec in existing_sections:
+                if existing_sec["section_id"] == section_id:
+                    # Merge items, avoiding duplicates
+                    for item in new_sec.get("items", []):
+                        if item not in existing_sec.get("items", []):
+                            existing_sec["items"].append(item)
+                    # Merge subsections
+                    _merge_subsections(existing_sec.get("subsections", []), new_sec.get("subsections", []))
+                    # Merge tables within sections
+                    _merge_section_tables(existing_sec.get("tables", []), new_sec.get("tables", []))
+                    break
+        else:
+            # Add new section
+            existing_sections.append(new_sec)
+            existing_ids.add(section_id)
+
+
+def _merge_section_tables(existing_tables, new_tables):
+    """Merge tables within sections, avoiding exact duplicates"""
+    for new_table in new_tables:
+        # Check if table already exists (basic duplicate detection)
+        is_duplicate = False
+        for existing_table in existing_tables:
+            if (existing_table.get("caption") == new_table.get("caption") and
+                len(existing_table.get("rows", [])) == len(new_table.get("rows", []))):
+                is_duplicate = True
+                break
+        
+        if not is_duplicate:
+            existing_tables.append(new_table)
+
+
+def _merge_subsections(existing_subsections, new_subsections):
+    """Merge subsections, avoiding duplicates"""
+    existing_ids = {sub.get("subsection_id") for sub in existing_subsections}
+    
+    for new_sub in new_subsections:
+        sub_id = new_sub.get("subsection_id")
+        if sub_id not in existing_ids:
+            existing_subsections.append(new_sub)
+            existing_ids.add(sub_id)
+
+
+
+def _preprocess_orphan_numbers(content_nodes):
+    """Pre-process content nodes to join orphan numbers with following content"""
+    buffer = []
+    i = 0
+    
+    while i < len(content_nodes):
+        node = content_nodes[i]
+        if not node or not hasattr(node, 'get_text'):
+            i += 1
+            continue
+            
+        txt = node.get_text().strip() if hasattr(node, 'get_text') else str(node).strip()
+        
+        # Check for orphan number (just "1." or "2." etc.)
+        if re.fullmatch(r'\d+\.', txt):
+            # Look for next non-empty content
+            j = i + 1
+            while j < len(content_nodes):
+                next_node = content_nodes[j]
+                if not next_node or not hasattr(next_node, 'get_text'):
+                    j += 1
+                    continue
+                    
+                next_txt = next_node.get_text().strip() if hasattr(next_node, 'get_text') else str(next_node).strip()
+                if next_txt:
+                    # Join orphan number with following content
+                    joined_text = f"{txt} {next_txt}"
+                    buffer.append(joined_text)
+                    i = j + 1
+                    break
+                j += 1
+            else:
+                # No following content found, keep orphan as is
+                buffer.append(txt)
+                i += 1
+        else:
+            buffer.append(txt)
+            i += 1
+    
+    return buffer
+
 
 class EURegulationAnalyzer:
     def __init__(self, regulation_url: str, regulation_metadata: Dict[str, Any], definition_articles: List[int] = None):
@@ -581,57 +876,367 @@ class EURegulationAnalyzer:
 
         return sorted(articles, key=lambda x: x['article_number'])
 
-    def _extract_annexes(self) -> List[Dict[str, Any]]:
-        """附属書の抽出"""
-        annexes = []
+    def _untruncate_hidden_text(self):
+        """Un-truncate hidden text by replacing display:none spans with their text content"""
         if not self.soup:
-            return annexes
+            return
+        
+        for span in self.soup.select('[style*="display:none"]'):
+            span.replace_with(span.get_text())
+    
+    def _parse_annex_tables(self, container) -> List[Dict[str, Any]]:
+        """Parse tables within an annex container"""
+        tables = []
+        
+        for table in container.find_all('table'):
+            try:
+                # Try to find table caption
+                caption = ""
+                caption_element = table.find_previous('p', class_='oj-ti-table')
+                if caption_element:
+                    caption = self._normalize_text(caption_element.get_text())
+                
+                # Use pandas to parse the table
+                df = pd.read_html(StringIO(str(table)))[0]
+                
+                # Clean up NaN values - replace with empty strings
+                df = df.fillna("")
+                
+                # Convert to dict records
+                rows = df.to_dict("records")
+                
+                tables.append({
+                    "caption": caption,
+                    "rows": rows
+                })
+                
+            except Exception as e:
+                print(f"Error parsing table: {e}")
+                # Fallback: manual table parsing
+                rows = []
+                for row in table.find_all('tr'):
+                    cells = row.find_all(['td', 'th'])
+                    if cells:
+                        row_data = {}
+                        for i, cell in enumerate(cells):
+                            row_data[f"col_{i}"] = self._normalize_text(cell.get_text())
+                        rows.append(row_data)
+                
+                if rows:
+                    tables.append({
+                        "caption": caption,
+                        "rows": rows
+                    })
+        
+        return tables
+    
+    def _validate_annex(self, annex: Dict[str, Any], original_html: str) -> None:
+        """Validate annex content according to requirements"""
+        # Rule 1: Each annex must have sections with at least one item of text
+        if not annex.get("sections"):
+            raise ValueError(f"Annex {annex.get('annex_id', 'unknown')} has no sections")
+        
+        has_content = False
+        for section in annex["sections"]:
+            if section.get("items") and any(item.strip() for item in section["items"]):
+                has_content = True
+                break
+        
+        if not has_content:
+            raise ValueError(f"Annex {annex.get('annex_id', 'unknown')} has no content in sections")
+        
+        # Rule 2: No items may equal "—" or be empty after strip()
+        for section in annex["sections"]:
+            for item in section.get("items", []):
+                if not item.strip() or item.strip() == "—":
+                    raise ValueError(f"Annex {annex.get('annex_id', 'unknown')} contains empty or dash-only items")
+        
+        # Rule 3: Word-count ratio between annex HTML and extracted text ≥ 0.90
+        html_words = len(original_html.split())
+        extracted_words = 0
+        
+        # Count words in title
+        extracted_words += len(annex.get("title", "").split())
+        
+        # Count words in sections
+        for section in annex["sections"]:
+            extracted_words += len(section.get("heading", "").split())
+            for item in section.get("items", []):
+                extracted_words += len(item.split())
+            for subsection in section.get("subsections", []):
+                for sub_item in subsection.get("items", []):
+                    extracted_words += len(sub_item.split())
+        
+        # Count words in tables within sections
+        for section in annex["sections"]:
+            for table in section.get("tables", []):
+                extracted_words += len(table.get("caption", "").split())
+                for row in table.get("rows", []):
+                    for value in row.values():
+                        if isinstance(value, str):
+                            extracted_words += len(value.split())
+        
+        if html_words > 0:
+            ratio = extracted_words / html_words
+            if ratio < 0.90:
+                print(f"Warning: Annex {annex.get('annex_id', 'unknown')} word ratio {ratio:.2f} < 0.90")
+
+    def _validate_annex_uniqueness(self, annexes: List[Dict[str, Any]]) -> None:
+        """Validate that annex_ids and section_ids within each annex are unique"""
+        # Check annex_id uniqueness
+        seen_annex_ids = set()
+        for annex in annexes:
+            annex_id = annex.get("annex_id")
+            if annex_id in seen_annex_ids:
+                raise ValueError(f"Duplicate annex_id: {annex_id}")
+            seen_annex_ids.add(annex_id)
+            
+            # Check section_id uniqueness within each annex
+            seen_section_ids = set()
+            for section in annex.get("sections", []):
+                section_id = section.get("section_id")
+                if section_id in seen_section_ids:
+                    raise ValueError(f"Duplicate section_id '{section_id}' in Annex {annex_id}")
+                seen_section_ids.add(section_id)
+
+    def _extract_annexes(self) -> List[Dict[str, Any]]:
+        """Extract annexes with comprehensive section and table parsing and deduplication"""
+        if not self.soup:
+            return []
 
         try:
-            # 附属書セクションを特定: div[id^="anx_"] (EUR-Lexの実際のパターン)
-            annex_divs = self.soup.select('div[id^="anx_"]')
+            # Step 1: Un-truncate hidden text
+            self._untruncate_hidden_text()
             
-            for idx, annex_div in enumerate(annex_divs):
-                # 附属書IDを取得（例: anx_1 → 1）
-                annex_id = annex_div.get('id', '')
-                annex_letter = annex_id.replace('anx_', '') if annex_id.startswith('anx_') else str(idx + 1)
-                
-                # タイトルを取得: <p class="oj-doc-ti">
-                title = ""
-                title_element = annex_div.find('p', class_='oj-doc-ti')
-                if title_element:
-                    title = self._normalize_text(title_element.get_text())
-                
-                # セクションを収集: <p class="oj-normal">
-                sections = []
-                section_elements = annex_div.find_all('p', class_='oj-normal')
-                
-                for section_element in section_elements:
-                    section_text = self._normalize_text(section_element.get_text())
-                    if section_text:
-                        sections.append(section_text)
-                
-                annex = {
-                    "annex_id": annex_letter,
-                    "title": title,
-                    "sections": sections,
-                    "order_index": idx + 1,
-                    "metadata": {
-                        "id": annex_id,
-                        "extracted_at": datetime.now().isoformat()
-                    }
-                }
-                annexes.append(annex)
-                
-                print(f"Annex {annex_letter}: {title} - Sections: {len(sections)}")
-                
+            # Step 2: Find annex headers
+            header_q = 'p.oj-doc-ti-annex, p.oj-ti-annex, p.oj-doc-ti'
+            headers = []
+            
+            for header in self.soup.select(header_q):
+                text = header.get_text().strip()
+                if 'ANNEX' in text.upper():
+                    headers.append(header)
+            
+            if not headers:
+                print("No annex headers found")
+                return []
+            
+            # Step 3: Process each annex with deduplication
+            annex_map: Dict[str, Dict[str, Any]] = {}
+            
+            for order_index, header in enumerate(headers, 1):
+                try:
+                    # Extract annex ID from header text
+                    header_text = header.get_text().strip()
+                    # Updated regex to handle standalone "ANNEX" or "ANNEX I", "ANNEX A", etc.
+                    annex_match = re.search(r'ANNEX(?:\s+([IVXLC]+|[A-Z]))?', header_text)
+                    if annex_match and annex_match.group(1):
+                        annex_id = annex_match.group(1)
+                        # Set title to just "ANNEX X" part, not the descriptive subtitle
+                        title = f"ANNEX {annex_id}"
+                        # Extract descriptive subtitle (everything after "ANNEX X")
+                        subtitle_match = re.search(rf'ANNEX\s+{re.escape(annex_id)}\s*(.+)', header_text)
+                        subtitle = subtitle_match.group(1).strip() if subtitle_match else ""
+                    else:
+                        # Special case: Long descriptive headers that belong to specific annexes
+                        # Normalize spaces for comparison (handle non-breaking spaces)
+                        normalized_text = re.sub(r'\s+', ' ', header_text)
+                        if 'testing in real world conditions' in normalized_text.lower() and 'article 60' in normalized_text.lower():
+                            # This is the ANNEX IX content header
+                            annex_id = 'IX'
+                            title = f"ANNEX {annex_id}"
+                            subtitle = header_text
+                            print(f"Detected ANNEX IX content header: {header_text[:100]}...")
+                        else:
+                            # Default to roman numeral based on order for standalone "ANNEX"
+                            roman_numerals = ['I', 'II', 'III', 'IV', 'V', 'VI', 'VII', 'VIII', 'IX', 'X', 'XI', 'XII', 'XIII', 'XIV', 'XV']
+                            annex_id = roman_numerals[order_index - 1] if order_index <= len(roman_numerals) else str(order_index)
+                            title = f"ANNEX {annex_id}"
+                            # Extract descriptive subtitle (everything after "ANNEX")
+                            subtitle_match = re.search(r'ANNEX\s*(.+)', header_text)
+                            subtitle = subtitle_match.group(1).strip() if subtitle_match else ""
+                            print(f"Using default annex ID '{annex_id}' for standalone ANNEX: {header_text}")
+                    
+                    # Step 4: Collect sibling nodes until next header or end
+                    current = header.next_sibling
+                    content_nodes = []
+                    
+                    while current:
+                        if current.name and current.name in ['p', 'div', 'table', 'ul', 'ol']:
+                            # Check if this is another annex header
+                            if (current.name == 'p' and 
+                                any(cls in current.get('class', []) for cls in ['oj-doc-ti-annex', 'oj-ti-annex', 'oj-doc-ti']) and
+                                'ANNEX' in current.get_text().upper()):
+                                break
+                            content_nodes.append(current)
+                        current = current.next_sibling
+                    
+                    # Step 5: Filter out subtitle nodes that should not become section content
+                    # Check if first few nodes are subtitle elements
+                    nodes_to_remove = 0
+                    for i, node in enumerate(content_nodes[:3]):  # Check first 3 nodes
+                        if node.name == 'p':
+                            node_text = self._normalize_text(node.get_text())
+                            node_classes = node.get('class', [])
+                            
+                            # Skip subtitle elements or descriptive text that looks like a subtitle
+                            if (any('oj-sti' in cls for cls in node_classes) or
+                                # Check if this looks like a descriptive subtitle for annexes
+                                (i == 0 and len(node_text) > 10 and len(node_text) < 200 and 
+                                 not any(pattern.match(node_text) for pattern in [
+                                     re.compile(r'^[—\-•]\s*(.+)'),
+                                     re.compile(r'^(\d+)[\.\)]\s+(.+)'),
+                                     re.compile(r'^\(([a-z])\)\s+(.+)'),
+                                     re.compile(r'^\(([ivx]+)\)\s+(.+)', re.IGNORECASE),
+                                     re.compile(r'^(\d+)\.\s+(\d+)\.\s+(.+)')
+                                 ]) and
+                                 not node_text.strip().endswith(':'))):
+                                nodes_to_remove = i + 1
+                                if not subtitle and i == 0:  # Use first removed node as subtitle
+                                    subtitle = node_text
+                                print(f"Marking node {i} for removal (subtitle): '{node_text[:50]}...'")
+                            else:
+                                break  # Stop at first non-subtitle node
+                    
+                    if nodes_to_remove > 0:
+                        content_nodes = content_nodes[nodes_to_remove:]
+                        print(f"Removed {nodes_to_remove} subtitle nodes for annex {annex_id}")
+                    
+                    # Step 5: Pre-process orphan numbers
+                    processed_texts = _preprocess_orphan_numbers(content_nodes)
+                    
+                    # Step 6: Process content nodes with integrated table handling
+                    builder = SectionBuilder()
+                    
+                    for i, node in enumerate(content_nodes):
+                        if node.name == 'p':
+                            text = processed_texts[i] if i < len(processed_texts) else self._normalize_text(node.get_text())
+                            if text:
+                                # Check if this is a DMA-style section header (oj-ti-grseq-1)
+                                if 'oj-ti-grseq-1' in node.get('class', []):
+                                    # This is a section header like "A. 'General'"
+                                    # Extract the letter and title
+                                    match = re.match(r'([A-Z])\.\s*[\'"]?(.+?)[\'"]?$', text)
+                                    if match:
+                                        section_id = match.group(1)
+                                        heading = match.group(2).strip("'\"")
+                                        # Create a numbered section (treat letter as number for consistency)
+                                        builder.feed_text(f"{ord(section_id) - ord('A') + 1}. {heading}")
+                                    else:
+                                        builder.feed_text(text)
+                                else:
+                                    builder.feed_text(text)
+                        
+                        elif node.name in ['ul', 'ol']:
+                            for li in node.find_all('li'):
+                                li_text = self._normalize_text(li.get_text())
+                                if li_text:
+                                    builder.feed_list(li_text)
+                        
+                        elif node.name == 'table':
+                            # Parse table as structured data and add to current section
+                            try:
+                                caption = ""
+                                caption_element = node.find_previous('p', class_='oj-ti-table')
+                                if caption_element:
+                                    caption = self._normalize_text(caption_element.get_text())
+                                
+                                # Use pandas to parse the table
+                                df = pd.read_html(StringIO(str(node)))[0]
+                                
+                                # Clean up NaN values - replace with empty strings
+                                df = df.fillna("")
+                                
+                                rows = df.to_dict("records")
+                                
+                                table_data = {
+                                    "caption": caption,
+                                    "rows": rows
+                                }
+                                
+                                # Add table to current section instead of processing as text
+                                builder.add_table_to_current_section(table_data)
+                                
+                            except Exception as e:
+                                print(f"Error parsing table in annex {annex_id}: {e}")
+                                # Fallback: process as text if table parsing fails
+                                for row in node.find_all('tr'):
+                                    cells = row.find_all(['td', 'th'])
+                                    if len(cells) >= 2:
+                                        first_cell = self._normalize_text(cells[0].get_text())
+                                        if first_cell and re.match(r'^\d+\.?$', first_cell.strip()):
+                                            content = ' '.join(self._normalize_text(cell.get_text()) for cell in cells[1:])
+                                            if content:
+                                                builder.feed_text(f"{first_cell} {content}")
+                        
+                        elif node.name == 'div':
+                            # Process paragraphs within div
+                            for p in node.find_all('p'):
+                                text = self._normalize_text(p.get_text())
+                                if text:
+                                    # Check for section headers in divs too
+                                    if 'oj-ti-grseq-1' in p.get('class', []):
+                                        match = re.match(r'([A-Z])\.\s*[\'"]?(.+?)[\'"]?$', text)
+                                        if match:
+                                            section_id = match.group(1)
+                                            heading = match.group(2).strip("'\"")
+                                            builder.feed_text(f"{ord(section_id) - ord('A') + 1}. {heading}")
+                                        else:
+                                            builder.feed_text(text)
+                                    else:
+                                        builder.feed_text(text)
+                    
+                    sections = builder.flush()
+                    
+                    # Step 7: Check for existing annex and merge or create new (no separate tables array)
+                    if annex_id in annex_map:
+                        # Merge into existing annex
+                        existing = annex_map[annex_id]
+                        _merge_sections(existing["sections"], sections)
+                        print(f"Merged content into existing Annex {annex_id}")
+                    else:
+                        # Create new annex (without top-level tables array)
+                        annex = {
+                            "annex_id": annex_id,
+                            "title": title,
+                            "subtitle": subtitle if 'subtitle' in locals() else "",
+                            "sections": sections,
+                            "order_index": order_index
+                        }
+                        
+                        # Validate annex
+                        original_html = ''.join(str(node) for node in content_nodes)
+                        if sections:  # Only validate if we have sections
+                            try:
+                                self._validate_annex(annex, original_html)
+                            except ValueError as e:
+                                print(f"Validation error for annex {annex_id}: {e}")
+                        
+                        annex_map[annex_id] = annex
+                        
+                        # Count tables in sections for logging
+                        total_tables = sum(len(section.get("tables", [])) for section in sections)
+                        print(f"Created Annex {annex_id}: {len(sections)} sections, {total_tables} tables")
+                    
+                except Exception as e:
+                    print(f"Error processing annex: {e}")
+                    import traceback
+                    traceback.print_exc()
+            
+            # Step 9: Convert map to sorted list and validate uniqueness
+            annexes = list(annex_map.values())
+            annexes.sort(key=lambda a: a["order_index"])
+            
+            # Step 10: Final validation
+            self._validate_annex_uniqueness(annexes)
+            
+            return annexes
+                    
         except Exception as e:
-            print(f"附属書の抽出中にエラー: {e}")
+            print(f"Error in annex extraction: {e}")
             import traceback
             traceback.print_exc()
-
-        # 附属書をIDでソート
-        return sorted(annexes, key=lambda x: x["annex_id"])
+            return []
         
 
     def save_structured_data(self):

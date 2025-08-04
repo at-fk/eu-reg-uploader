@@ -5,3 +5,4 @@ supabase==2.0.3
 rich==13.7.0
 requests==2.31.0
 roman==4.1
+pandas==2.2.2
