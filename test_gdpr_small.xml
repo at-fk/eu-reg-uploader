@@ -1,0 +1,100 @@
+<rdf:RDF
+    xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+    xmlns:j.0="http://publications.europa.eu/ontology/cdm#"
+    xmlns:owl="http://www.w3.org/2002/07/owl#"
+    xmlns:j.1="http://www.w3.org/2004/02/skos/core#"
+    xmlns:j.2="http://publications.europa.eu/ontology/annotation#"
+    xmlns:j.3="http://publications.europa.eu/ontology/cdm/cmr#" > 
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/cellar/4c8da96f-a55a-11e5-b528-01aa75ed71a1">
+    <owl:sameAs rdf:resource="http://publications.europa.eu/resource/immc/20151208-025%3AST%2012802%202015%20"/>
+    <owl:sameAs rdf:resource="http://publications.europa.eu/resource/oj/JOL_2015_332_R_0001"/>
+    <owl:sameAs rdf:resource="http://publications.europa.eu/resource/immc/20151208-025%3AST%2012802%202015%20INIT"/>
+    <owl:sameAs rdf:resource="http://publications.europa.eu/resource/celex/32015L2376"/>
+    <owl:sameAs rdf:resource="http://publications.europa.eu/resource/eli/dir/2015/2376/oj"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/celex/52016PC0214">
+    <j.0:work_part_of_dossier rdf:resource="http://publications.europa.eu/resource/pegase/201286"/>
+    <j.0:part_of rdf:resource="http://publications.europa.eu/resource/pegase/201286"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="A0">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Axiom"/>
+    <owl:annotatedSource rdf:resource="http://publications.europa.eu/resource/celex/31995L0046"/>
+    <owl:annotatedProperty rdf:resource="http://publications.europa.eu/ontology/cdm#work_cited_by_work"/>
+    <owl:annotatedTarget rdf:resource="http://publications.europa.eu/resource/celex/62021CJ0129"/>
+    <j.2:fragment_citing_source rdf:datatype="http://www.w3.org/2001/XMLSchema#string">N 63 66</j.2:fragment_citing_source>
+    <j.2:fragment_cited_target rdf:datatype="http://www.w3.org/2001/XMLSchema#string">A17P1LB</j.2:fragment_cited_target>
+    <j.2:build_info rdf:datatype="http://www.w3.org/2001/XMLSchema#string">reception-ID: PO-20250611-6356; environment: PROD; CERES: 4.29.0; IMMC2CDM: 3.2.3; workflow: CASELAW_METADATA_UPDATE; rules: caselaw-legacy-20250516-0; builddate: 2025-06-12T05:34:47.186;</j.2:build_info>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="A1">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Axiom"/>
+    <owl:annotatedTarget rdf:resource="http://publications.europa.eu/resource/oj/JOC_2022_138_R_0009"/>
+    <owl:annotatedSource rdf:resource="http://publications.europa.eu/resource/celex/32016R0679"/>
+    <owl:annotatedProperty rdf:resource="http://publications.europa.eu/ontology/cdm#resource_legal_preliminary_question-submitted_by_communication_case_new"/>
+    <j.2:type_of_link_target>AJ</j.2:type_of_link_target>
+    <j.2:reference_to_modified_location>{AR|http://publications.europa.eu/resource/authority/fd_370/AR} 58 {PA|http://publications.europa.eu/resource/authority/fd_370/PA} 2 {PTA|http://publications.europa.eu/resource/authority/fd_370/PTA} (g)</j.2:reference_to_modified_location>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/celex/52019IP0441">
+    <j.0:work_cited_by_work rdf:resource="http://publications.europa.eu/resource/oj/JOC_2022_342_R_0012"/>
+    <j.0:cited_by rdf:resource="http://publications.europa.eu/resource/oj/JOC_2022_342_R_0012"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="A2">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Axiom"/>
+    <owl:annotatedSource rdf:resource="http://publications.europa.eu/resource/celex/32022R2065"/>
+    <j.2:fragment_citing_source rdf:datatype="http://www.w3.org/2001/XMLSchema#string">N 117</j.2:fragment_citing_source>
+    <j.2:fragment_cited_target rdf:datatype="http://www.w3.org/2001/XMLSchema#string">C95</j.2:fragment_cited_target>
+    <j.2:build_info rdf:datatype="http://www.w3.org/2001/XMLSchema#string">reception-ID: PO-20250730-5880; environment: PROD; CERES: 4.29.0; IMMC2CDM: 3.2.3; workflow: CASELAW_METADATA_UPDATE; rules: caselaw-legacy-20250626-0; builddate: 2025-07-30T19:58:31.875;</j.2:build_info>
+    <owl:annotatedTarget rdf:resource="http://publications.europa.eu/resource/celex/62024TO0138"/>
+    <owl:annotatedProperty rdf:resource="http://publications.europa.eu/ontology/cdm#work_cited_by_work"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://eurovoc.europa.eu/5922">
+    <j.0:subject_of rdf:resource="http://publications.europa.eu/resource/oj/JOL_2021_256_R_0002"/>
+    <j.0:concept_eurovoc_subject_of_work rdf:resource="http://publications.europa.eu/resource/oj/JOL_2021_256_R_0002"/>
+    <j.0:subject_of rdf:resource="http://publications.europa.eu/resource/oj/JOC_2022_081_R_0019"/>
+    <j.0:concept_eurovoc_subject_of_work rdf:resource="http://publications.europa.eu/resource/oj/JOC_2022_081_R_0019"/>
+    <j.0:subject_of rdf:resource="http://publications.europa.eu/resource/comnat/COM_2020_0569_FIN"/>
+    <j.0:concept_eurovoc_subject_of_work rdf:resource="http://publications.europa.eu/resource/comnat/COM_2020_0569_FIN"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="A3">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Axiom"/>
+    <owl:annotatedSource rdf:resource="http://publications.europa.eu/resource/celex/32016R0679"/>
+    <j.2:fragment_citing_source rdf:datatype="http://www.w3.org/2001/XMLSchema#string">N 41 49 54 56</j.2:fragment_citing_source>
+    <j.2:fragment_cited_target rdf:datatype="http://www.w3.org/2001/XMLSchema#string">A78</j.2:fragment_cited_target>
+    <j.2:build_info rdf:datatype="http://www.w3.org/2001/XMLSchema#string">reception-ID: PO-20250617-4731; environment: PROD; CERES: 4.29.0; IMMC2CDM: 3.2.3; workflow: CASELAW_METADATA_UPDATE; rules: caselaw-legacy-20250516-0; builddate: 2025-06-17T18:05:14.921;</j.2:build_info>
+    <owl:annotatedTarget rdf:resource="http://publications.europa.eu/resource/celex/62020CJ0319"/>
+    <owl:annotatedProperty rdf:resource="http://publications.europa.eu/ontology/cdm#work_cited_by_work"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/immc/SWD%282023%2949%20final">
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#work"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/comnat/SWD_2025_0290_FIN">
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#work"/>
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#resource_legal"/>
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#act_preparatory"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/cellar/99eadf7b-8056-11e9-9f05-01aa75ed71a1">
+    <owl:sameAs rdf:resource="http://publications.europa.eu/resource/ecli/ECLI%3AEU%3AC%3A2019%3A457"/>
+    <owl:sameAs rdf:resource="http://publications.europa.eu/resource/celex/62018CJ0509"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/celex/62017CJ0257">
+    <j.0:work_cited_by_work rdf:resource="http://publications.europa.eu/resource/comnat/SWD_2019_0286_FIN"/>
+    <j.0:cited_by rdf:resource="http://publications.europa.eu/resource/comnat/SWD_2019_0286_FIN"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/oj/JOL_2022_333_R_0004">
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#directive"/>
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#work"/>
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#resource_legal"/>
+    <rdf:type rdf:resource="http://publications.europa.eu/ontology/cdm#legislation_secondary"/>
+  </rdf:Description>
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/procedure/2023_99">
+    <j.0:dossier_contains_work rdf:resource="http://publications.europa.eu/resource/immc/COM%282023%29205%20final"/>
+    <j.0:contains rdf:resource="http://publications.europa.eu/resource/immc/COM%282023%29205%20final"/>
+  </rdf:Description>
+  <rdf:Description rdf:nodeID="A4">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Axiom"/>
+    <owl:annotatedTarget rdf:resource="http://publications.europa.eu/resource/celex/62021CJ0129"/>
+    <owl:annotatedSource rdf:resource="http://publications.europa.eu/resource/celex/32002L0058"/>
+    <owl:annotatedProperty rdf:resource="http://publications.europa.eu/ontology/cdm#work_cited_by_work"/>
+    <j.2:fragment_citing_source rdf:datatype="http://www.w3.org/2001/XMLSchema#string">N 4 62</j.2:fragment_citing_source>
+    <j.2:fragment_cited_target rdf:datatype="http://www.w3.org/2001/XMLSchema#string">C10</j.2:fragment_cited_target>
+    <j.2:build_info rdf:datatype="http://www.w3.org/2001/XMLSchema#string">reception-ID: PO-20250611-6356; environment: PROD; CERES: 4.29.0; IMMC2CDM: 3.2.3; workflow: CASELAW_METADATA_UPDATE; rules: caselaw-legacy-20250516-0; builddate: 2025-06-12T05:34:47.186;</j.2:build_info>
+  </rdf:Description>

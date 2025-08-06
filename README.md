@@ -105,6 +105,35 @@ python -m eu_link_db.cli_hierarchical --help
 
 ### Command Line Interface
 
+#### 0. EDPB Document Collection
+
+Collect GDPR-related guidelines and recommendations from the European Data Protection Board (EDPB):
+
+```bash
+# Collect all EDPB documents (Guidelines, Recommendations, Article 29 WP documents)
+python collect_final_complete_edpb.py
+
+# Collect from specific page
+python edpb_guideline_collector.py --page 5 --download-dir edpb_documents
+
+# Add EDPB collection to CLI
+python -m eu_link_db.cli_hierarchical collect-edpb-guidelines
+```
+
+**Features:**
+- **Complete coverage**: All pages (0-6) with 59 documents
+- **Article 29 Working Party integration**: Automatically detects and downloads WP documents
+- **Smart deduplication**: Prevents filename conflicts with automatic numbering
+- **Enhanced titles**: Article 29 documents get improved titles (e.g., "WP29 - Guidelines on transparency")
+- **Multiple document types**: Guidelines, Recommendations, Transparency docs, DPO guides, DPIA materials
+- **JSON logging**: Complete metadata and statistics saved for each collection run
+
+**Document Types Collected:**
+- **EDPB Guidelines** (e.g., Guidelines 1/2024 on legitimate interests)
+- **EDPB Recommendations** (e.g., Recommendations on BCR)
+- **Article 29 Working Party documents** (legacy guidelines with "WP29 -" prefix)
+- **Special documents** (Transparency, Data Protection Officer, DPIA guides)
+
 #### 1. Basic Data Ingestion
 
 ```bash
@@ -233,6 +262,14 @@ The system correctly assigns citations to the most specific provision level:
 
 This ensures citations are linked to the exact legal provision referenced by the court.
 
+### EDPB Document Collection
+- **Complete coverage**: Collects all 59 GDPR-related documents from EDPB website
+- **Article 29 integration**: Seamlessly handles legacy Working Party documents
+- **Smart deduplication**: Prevents filename conflicts with automatic numbering
+- **Enhanced titles**: Article 29 documents get "WP29 -" prefixes for clarity
+- **Multi-page support**: Processes all website pages (0-6) automatically
+- **Format detection**: Handles Guidelines, Recommendations, and special documents
+
 ### Multi-Format Support
 - **Auto-detection**: Automatically detects XML format (RDF/XML vs NOTICE)
 - **Unified processing**: Single batch command handles multiple formats
@@ -340,6 +377,8 @@ eu-reg-uploader5/
 │   ├── amendment_parser.py             # Amendment history extraction
 │   ├── staged_implementation_parser.py # Staged implementation schedule parser
 │   └── cli_hierarchical.py             # Command-line interface
+├── edpb_guideline_collector.py         # EDPB document collection system
+├── collect_final_complete_edpb.py      # Complete EDPB collection script
 ├── xml_to_db_updater.py                # XML metadata to database updater
 ├── staged_implementation_cli.py        # CLI for staged implementation management
 ├── tests/                              # Comprehensive test suite

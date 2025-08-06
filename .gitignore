@@ -231,4 +231,12 @@ config.json
 !metadata/*.json
 !requirements.txt
 !package.json
-!package-lock.json 
+!package-lock.json
+!eu_link_db/*.json
+
+# EDPB PDF collections (large files - can be downloaded separately)
+edpb_final_complete_collection/
+edpb_*/
+
+# Legacy and old files
+old/ 

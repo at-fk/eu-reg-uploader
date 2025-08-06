@@ -17,6 +17,10 @@ from .cellar_citation_ingester import CellarCitationIngester
 from .eurlex_notice_parser import EurLexNoticeParser
 from .batch_processor import EURegulationBatchProcessor
 
+import sys
+sys.path.append('..')
+from edpb_guideline_collector import EDPBGuidelineCollector
+
 console = Console()
 
 @click.group()
@@ -374,6 +378,32 @@ def batch_process(data_dir, db_url):
         
     except Exception as e:
         console.print(f"❌ Error during batch processing: {e}", style="red")
+        raise
+
+@cli.command()
+@click.option('--page', default=0, help='Page number to scrape (default: 0)')
+@click.option('--download-dir', default='edpb_guidelines', help='Directory to save PDFs (default: edpb_guidelines)')
+def collect_edpb_guidelines(page, download_dir):
+    """Collect EDPB GDPR guidelines from public consultations."""
+    
+    collector = EDPBGuidelineCollector(download_dir)
+    
+    console.print(f"🔄 Starting EDPB guideline collection for page {page}")
+    console.print(f"📁 Download directory: {download_dir}")
+    
+    try:
+        downloaded_files = collector.collect_guidelines(page)
+        
+        if downloaded_files:
+            console.print(f"\n✅ Successfully downloaded {len(downloaded_files)} guidelines:")
+            for file_info in downloaded_files:
+                console.print(f"  • {file_info['title']}")
+                console.print(f"    📄 {file_info['file_path']}")
+        else:
+            console.print(f"\n⚠️  No guidelines downloaded from page {page}")
+            
+    except Exception as e:
+        console.print(f"\n❌ Error during collection: {e}")
         raise
 
 if __name__ == "__main__":
