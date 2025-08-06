@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"
+         xmlns:owl="http://www.w3.org/2002/07/owl#"
+         xmlns:j.0="http://publications.europa.eu/ontology/cdm#"
+         xmlns:j.2="http://publications.europa.eu/ontology/annotation#">
+
+  <!-- Citation relationship 1: GDPR cited by case 62021CJ0129 -->
+  <rdf:Description rdf:nodeID="A0">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Axiom"/>
+    <owl:annotatedSource rdf:resource="http://publications.europa.eu/resource/celex/32016R0679"/>
+    <owl:annotatedProperty rdf:resource="http://publications.europa.eu/ontology/cdm#work_cited_by_work"/>
+    <owl:annotatedTarget rdf:resource="http://publications.europa.eu/resource/celex/62021CJ0129"/>
+    <j.2:fragment_citing_source>N 63 66</j.2:fragment_citing_source>
+    <j.2:fragment_cited_target>A17P1LB</j.2:fragment_cited_target>
+  </rdf:Description>
+
+  <!-- Citation relationship 2: GDPR cited by case 62020CJ0319 -->
+  <rdf:Description rdf:nodeID="A3">
+    <rdf:type rdf:resource="http://www.w3.org/2002/07/owl#Axiom"/>
+    <owl:annotatedSource rdf:resource="http://publications.europa.eu/resource/celex/32016R0679"/>
+    <owl:annotatedProperty rdf:resource="http://publications.europa.eu/ontology/cdm#work_cited_by_work"/>
+    <owl:annotatedTarget rdf:resource="http://publications.europa.eu/resource/celex/62020CJ0319"/>
+    <j.2:fragment_citing_source>N 41 49 54 56</j.2:fragment_citing_source>
+    <j.2:fragment_cited_target>A78</j.2:fragment_cited_target>
+  </rdf:Description>
+
+  <!-- Case law resource -->
+  <rdf:Description rdf:about="http://publications.europa.eu/resource/celex/62021CJ0129">
+    <j.0:resource_legal_title>Test Case 2021</j.0:resource_legal_title>
+    <j.0:work_date_document>2021-01-15</j.0:work_date_document>
+    <j.0:case-law_ecli>ECLI:EU:C:2021:129</j.0:case-law_ecli>
+  </rdf:Description>
+
+</rdf:RDF>
