@@ -105,28 +105,41 @@ python -m eu_link_db.cli_hierarchical --help
 
 ### Command Line Interface
 
-#### 0. EDPB Document Collection
+#### 0. EDPB Document Collection and Processing
 
-Collect GDPR-related guidelines and recommendations from the European Data Protection Board (EDPB):
+Collect and process GDPR-related guidelines and recommendations from the European Data Protection Board (EDPB):
 
 ```bash
 # Collect all EDPB documents (Guidelines, Recommendations, Article 29 WP documents)
 python collect_final_complete_edpb.py
 
-# Collect from specific page
-python edpb_guideline_collector.py --page 5 --download-dir edpb_documents
+# Process EDPB documents with AI analysis
+python edpb_cli.py process-batch edpb_final_complete_collection/
 
-# Add EDPB collection to CLI
-python -m eu_link_db.cli_hierarchical collect-edpb-guidelines
+# Check processing status
+python edpb_cli.py status
+
+# List processed guidelines
+python edpb_cli.py list-guidelines
+
+# Show detailed information for specific guideline
+python edpb_cli.py show-detail 1
 ```
 
-**Features:**
+**Collection Features:**
 - **Complete coverage**: All pages (0-6) with 59 documents
 - **Article 29 Working Party integration**: Automatically detects and downloads WP documents
 - **Smart deduplication**: Prevents filename conflicts with automatic numbering
 - **Enhanced titles**: Article 29 documents get improved titles (e.g., "WP29 - Guidelines on transparency")
 - **Multiple document types**: Guidelines, Recommendations, Transparency docs, DPO guides, DPIA materials
 - **JSON logging**: Complete metadata and statistics saved for each collection run
+
+**Processing Features:**
+- **AI-powered analysis**: Uses Gemini 2.5 Pro for summary generation
+- **Vector embeddings**: 768-dimensional embeddings via gemini-embedding-001
+- **Structured metadata**: Automatic extraction of titles, versions, dates, related articles
+- **Full-text indexing**: Complete PDF text extraction and chunking
+- **SQLite storage**: Integration with eu_hierarchical.db database
 
 **Document Types Collected:**
 - **EDPB Guidelines** (e.g., Guidelines 1/2024 on legitimate interests)
@@ -288,7 +301,7 @@ This ensures citations are linked to the exact legal provision referenced by the
 
 ## 📈 Processing Results
 
-### Complete Dataset (as of 2024)
+### Complete Dataset (as of 2025)
 ```
 📊 Database Statistics:
 ├── Regulations: 2 (GDPR + AI Act)
@@ -299,6 +312,11 @@ This ensures citations are linked to the exact legal provision referenced by the
 │   ├── Article-level: 55 citations
 │   ├── Paragraph-level: 95 citations  
 │   └── Subparagraph-level: 39 citations
+├── EDPB Guidelines: 34+ processed documents
+│   ├── AI-generated summaries: 34+ detailed summaries
+│   ├── Text chunks: 3,000+ searchable chunks
+│   ├── Vector embeddings: 768-dimensional embeddings for semantic search
+│   └── Document types: Guidelines, Recommendations, WP29 documents
 └── Staged Implementation: 15 implementation phases
     ├── AI Act: 12 phases (2024-2031)
     └── GDPR: 3 phases (2016-2020)
@@ -379,6 +397,9 @@ eu-reg-uploader5/
 │   └── cli_hierarchical.py             # Command-line interface
 ├── edpb_guideline_collector.py         # EDPB document collection system
 ├── collect_final_complete_edpb.py      # Complete EDPB collection script
+├── edpb_processor.py                   # EDPB PDF processing with AI analysis
+├── edpb_cli.py                         # EDPB processing command-line interface
+├── edpb_final_complete_collection/     # Downloaded EDPB PDF documents
 ├── xml_to_db_updater.py                # XML metadata to database updater
 ├── staged_implementation_cli.py        # CLI for staged implementation management
 ├── tests/                              # Comprehensive test suite
@@ -388,7 +409,7 @@ eu-reg-uploader5/
 ├── test_batch/                         # Sample test data
 │   ├── test_structured.json            # Sample regulation data
 │   └── test.xml                        # Sample RDF/XML citation data
-├── requirements.txt                    # Python dependencies
+├── requirements.txt                    # Python dependencies (includes Gemini AI)
 ├── README.md                           # This documentation
 └── legacy files...                     # Original regulation uploader components
 ```
